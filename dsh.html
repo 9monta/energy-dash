@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AC Energy Monitor Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bp-navy:    #0a1628;
+            --bp-dark:    #0d1e35;
+            --bp-mid:     #112240;
+            --bp-teal:    #1a7a9a;
+            --bp-cyan:    #29b6d8;
+            --bp-light:   #5dd4ee;
+            --bp-white:   #e8f4f8;
+            --bp-gray:    #7a9ab5;
+            --bp-border:  #1e3a5a;
+            --bp-card:    #0f1d30;
+            --glow-teal:  0 0 18px rgba(41,182,216,0.35);
+            --glow-soft:  0 4px 24px rgba(10,22,40,0.7);
+        }
+ 
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+ 
+        body {
+            background: var(--bp-navy);
+            color: var(--bp-white);
+            font-family: 'Exo 2', sans-serif;
+            min-height: 100vh;
+            padding: 0;
+            overflow-x: hidden;
+        }
+ 
+        /* ── Animated background grid ── */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(41,182,216,0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(41,182,216,0.04) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+ 
+        /* ── Top bar ── */
+        .topbar {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 32px;
+            background: linear-gradient(90deg, #071020 0%, #0d1e35 60%, #071325 100%);
+            border-bottom: 2px solid var(--bp-teal);
+            box-shadow: 0 2px 20px rgba(41,182,216,0.2);
+        }
+ 
+        .topbar-logo {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+ 
+        .topbar-logo img {
+            height: 52px;
+            border-radius: 6px;
+            background: white;
+            padding: 4px 8px;
+        }
+ 
+        .topbar-logo-text {
+            display: flex;
+            flex-direction: column;
+        }
+ 
+        .topbar-logo-text span:first-child {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--bp-cyan);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+ 
+        .topbar-logo-text span:last-child {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 11px;
+            color: var(--bp-gray);
+            letter-spacing: 1px;
+        }
+ 
+        .topbar-title {
+            text-align: center;
+            flex: 1;
+        }
+ 
+        .topbar-title h1 {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.9em;
+            font-weight: 700;
+            color: var(--bp-white);
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            text-shadow: 0 0 20px rgba(41,182,216,0.4);
+        }
+ 
+        .topbar-title p {
+            font-size: 11px;
+            color: var(--bp-gray);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+ 
+        .topbar-status {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+        }
+ 
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 5px 14px;
+            background: rgba(41,182,216,0.08);
+            border: 1px solid var(--bp-border);
+            border-radius: 20px;
+            font-size: 12px;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+ 
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+ 
+        .connected    { background: #22d98a; box-shadow: 0 0 8px #22d98a; }
+        .disconnected { background: #f85149; }
+        .connecting   { background: #f0883e; }
+ 
+        @keyframes pulse {
+            0%,100% { opacity: 1; transform: scale(1); }
+            50%      { opacity: 0.6; transform: scale(0.85); }
+        }
+ 
+        /* ── Main content ── */
+        .main {
+            position: relative;
+            z-index: 1;
+            padding: 28px 32px;
+            max-width: 1300px;
+            margin: 0 auto;
+        }
+ 
+        /* ── Config panel ── */
+        .config-panel {
+            background: var(--bp-card);
+            border: 1px solid var(--bp-border);
+            border-radius: 12px;
+            padding: 22px 28px;
+            margin-bottom: 30px;
+            box-shadow: var(--glow-soft);
+        }
+ 
+        .config-panel h3 {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--bp-cyan);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+ 
+        .config-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr auto;
+            gap: 14px;
+            align-items: end;
+        }
+ 
+        .input-group label {
+            display: block;
+            font-size: 11px;
+            color: var(--bp-gray);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+ 
+        .input-group input {
+            width: 100%;
+            padding: 9px 14px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--bp-border);
+            border-radius: 6px;
+            color: var(--bp-white);
+            font-size: 13px;
+            font-family: 'Exo 2', sans-serif;
+            transition: border-color 0.2s;
+        }
+ 
+        .input-group input:focus {
+            outline: none;
+            border-color: var(--bp-cyan);
+            box-shadow: 0 0 0 2px rgba(41,182,216,0.15);
+        }
+ 
+        .btn {
+            padding: 9px 24px;
+            background: linear-gradient(135deg, var(--bp-teal), var(--bp-cyan));
+            border: none;
+            border-radius: 6px;
+            color: white;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.25s;
+            white-space: nowrap;
+        }
+ 
+        .btn:hover   { transform: translateY(-2px); box-shadow: var(--glow-teal); }
+        .btn:disabled { background: #1e3a5a; color: var(--bp-gray); cursor: not-allowed; transform: none; }
+ 
+        /* ── Alert ── */
+        .alert-box {
+            display: none;
+            padding: 16px 22px;
+            background: rgba(248,81,73,0.1);
+            border: 1px solid #f85149;
+            border-radius: 8px;
+            margin-bottom: 24px;
+            animation: slideIn 0.3s ease;
+        }
+        .alert-box.show { display: block; }
+        .alert-title { color: #f85149; font-family: 'Rajdhani', sans-serif; font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+        .alert-message { color: var(--bp-gray); font-size: 13px; line-height: 1.5; }
+ 
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+ 
+        /* ── Section label ── */
+        .section-label {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--bp-gray);
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .section-label::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, var(--bp-border), transparent);
+        }
+ 
+        /* ── Cards grid ── */
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+ 
+        .card {
+            background: var(--bp-card);
+            border: 1px solid var(--bp-border);
+            border-radius: 14px;
+            padding: 24px 26px;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.25s, box-shadow 0.25s;
+            box-shadow: var(--glow-soft);
+        }
+ 
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--bp-teal), var(--bp-light));
+            opacity: 0.7;
+        }
+ 
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 32px rgba(41,182,216,0.18);
+            border-color: var(--bp-teal);
+        }
+ 
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+ 
+        .card-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            background: rgba(41,182,216,0.1);
+            border: 1px solid rgba(41,182,216,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+ 
+        .card-label {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--bp-gray);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+ 
+        .card-value-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+ 
+        .value {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 48px;
+            font-weight: 700;
+            color: var(--bp-cyan);
+            line-height: 1;
+            text-shadow: 0 0 20px rgba(41,182,216,0.4);
+            transition: color 0.3s;
+        }
+ 
+        .unit {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 20px;
+            font-weight: 500;
+            color: var(--bp-gray);
+        }
+ 
+        /* ── Footer ── */
+        .footer {
+            text-align: center;
+            padding: 24px 0 16px;
+            border-top: 1px solid var(--bp-border);
+            margin-top: 10px;
+        }
+ 
+        .footer p {
+            font-size: 12px;
+            color: var(--bp-gray);
+            letter-spacing: 1px;
+        }
+ 
+        .footer code {
+            color: var(--bp-cyan);
+            font-size: 11px;
+        }
+ 
+        /* ── Tariff Gauge ── */
+        .gauge-section {
+            margin-bottom: 30px;
+        }
+
+        .gauge-card {
+            background: var(--bp-card);
+            border: 1px solid var(--bp-border);
+            border-radius: 14px;
+            padding: 28px 32px 24px;
+            box-shadow: var(--glow-soft);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s;
+        }
+
+        .gauge-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 32px rgba(41,182,216,0.18);
+            border-color: var(--bp-teal);
+        }
+
+        .gauge-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, #22d98a, #f5c518, #f0883e, #f85149);
+        }
+
+        .gauge-title {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--bp-gray);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .gauge-wrap {
+            position: relative;
+            width: 380px;
+            height: 210px;
+        }
+
+        .gauge-wrap svg {
+            width: 100%;
+            height: 100%;
+            overflow: visible;
+        }
+
+        .gauge-cost-display {
+            text-align: center;
+            margin-top: 12px;
+        }
+
+        .gauge-cost-value {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 42px;
+            font-weight: 700;
+            color: var(--bp-cyan);
+            line-height: 1;
+            text-shadow: 0 0 20px rgba(41,182,216,0.4);
+        }
+
+        .gauge-cost-sub {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 13px;
+            color: var(--bp-gray);
+            letter-spacing: 1px;
+            margin-top: 4px;
+        }
+
+        .gauge-tiers {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .gauge-tier {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 12px;
+            color: var(--bp-gray);
+            letter-spacing: 0.5px;
+        }
+
+        .tier-dot {
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        /* ── Trend Charts ── */
+        .charts-section {
+            margin-bottom: 30px;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .chart-card {
+            background: var(--bp-card);
+            border: 1px solid var(--bp-border);
+            border-radius: 14px;
+            padding: 20px 20px 14px;
+            box-shadow: var(--glow-soft);
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s;
+        }
+
+        .chart-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 32px rgba(41,182,216,0.18);
+            border-color: var(--bp-teal);
+        }
+
+        .chart-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+        }
+
+        .chart-card.volt::before  { background: var(--bp-cyan); }
+        .chart-card.curr::before  { background: #22d98a; }
+        .chart-card.pwr::before   { background: #f5c518; }
+
+        .chart-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+
+        .chart-label {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--bp-gray);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .chart-live-val {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+
+        .chart-card.volt .chart-live-val { color: var(--bp-cyan); }
+        .chart-card.curr .chart-live-val { color: #22d98a; }
+        .chart-card.pwr  .chart-live-val { color: #f5c518; }
+
+        .chart-canvas-wrap {
+            position: relative;
+            height: 140px;
+        }
+
+        @media (max-width: 900px) {
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 900px) {
+            .cards-grid { grid-template-columns: repeat(2, 1fr); }
+            .config-row { grid-template-columns: 1fr 1fr; }
+            .topbar { flex-direction: column; gap: 12px; text-align: center; }
+            .topbar-status { align-items: center; }
+        }
+ 
+        @media (max-width: 560px) {
+            .cards-grid { grid-template-columns: 1fr; }
+            .config-row { grid-template-columns: 1fr; }
+            .main { padding: 18px 16px; }
+        }
+    </style>
+</head>
+<body>
+ 
+<!-- ── Top Bar ── -->
+<div class="topbar">
+    <div class="topbar-logo">
+        <img src="data:image/png;base64,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" alt="Bahrain Polytechnic" onerror="this.style.display='none'">
+        <div class="topbar-logo-text">
+            <span>Bahrain Polytechnic</span>
+            <span>بوليتكنك البحرين</span>
+        </div>
+    </div>
+ 
+    <div class="topbar-title">
+        <h1>🏡 AC Energy Monitor Dashboard</h1>
+        <p>Real-time Power Monitoring System</p>
+    </div>
+ 
+    <div class="topbar-status">
+        <div class="status-pill">
+            <div id="mqtt-dot" class="status-dot disconnected"></div>
+            <span id="mqtt-status">Disconnected</span>
+        </div>
+        <div class="status-pill" style="font-size:11px; color: var(--bp-gray);">
+            Last Update: <span id="last-update" style="color:var(--bp-cyan); margin-left:4px;">Never</span>
+        </div>
+    </div>
+</div>
+ 
+<!-- ── Main ── -->
+<div class="main">
+ 
+    <!-- Config -->
+    <div class="config-panel">
+        <h3>⚙ MQTT Broker Configuration</h3>
+        <div class="config-row">
+            <div class="input-group">
+                <label>Broker URL (WebSocket)</label>
+                <input type="text" id="broker-url" value="ws://broker.hivemq.com:8000/mqtt" placeholder="ws://broker.hivemq.com:8000/mqtt">
+            </div>
+            <div class="input-group">
+                <label>Username (optional)</label>
+                <input type="text" id="username" placeholder="Leave empty if no auth">
+            </div>
+            <div class="input-group">
+                <label>Password (optional)</label>
+                <input type="password" id="password" placeholder="Leave empty if no auth">
+            </div>
+            <button class="btn" id="connect-btn" onclick="connectToBroker()">Connect</button>
+        </div>
+    </div>
+ 
+    <!-- Alert -->
+    <div id="alert-box" class="alert-box">
+        <div class="alert-title">⚠ Connection Error</div>
+        <div class="alert-message" id="alert-message"></div>
+    </div>
+ 
+    <!-- Cards -->
+    <div class="section-label">Live Measurements</div>
+ 
+    <div class="cards-grid">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon">⚡</div>
+                <span class="card-label">Voltage</span>
+            </div>
+            <div class="card-value-row">
+                <span id="voltage" class="value">--</span>
+                <span class="unit">V</span>
+            </div>
+        </div>
+ 
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon">🔌</div>
+                <span class="card-label">Current</span>
+            </div>
+            <div class="card-value-row">
+                <span id="current" class="value">--</span>
+                <span class="unit">A</span>
+            </div>
+        </div>
+ 
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon">💡</div>
+                <span class="card-label">Power</span>
+            </div>
+            <div class="card-value-row">
+                <span id="power" class="value">--</span>
+                <span class="unit">W</span>
+            </div>
+        </div>
+ 
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon">📊</div>
+                <span class="card-label">Energy</span>
+            </div>
+            <div class="card-value-row">
+                <span id="energy" class="value">--</span>
+                <span class="unit">kWh</span>
+            </div>
+        </div>
+ 
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon">📡</div>
+                <span class="card-label">Frequency</span>
+            </div>
+            <div class="card-value-row">
+                <span id="frequency" class="value">--</span>
+                <span class="unit">Hz</span>
+            </div>
+        </div>
+ 
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon">📈</div>
+                <span class="card-label">Power Factor</span>
+            </div>
+            <div class="card-value-row">
+                <span id="pf" class="value">--</span>
+            </div>
+        </div>
+    </div>
+ 
+    <div class="section-label">Bahrain Tariff Cost Meter</div>
+
+    <!-- Tariff Gauge -->
+    <div class="gauge-section">
+        <div class="gauge-card">
+            <div class="gauge-title">💰 Running Monthly Bill — Bahrain Tiered Tariff</div>
+            <div style="position:absolute; top:18px; right:22px; font-family:'Rajdhani',sans-serif; font-size:11px; color:var(--bp-gray); letter-spacing:1px; text-align:right;">
+                <div style="text-transform:uppercase; font-size:10px; margin-bottom:2px;">Running for</div>
+                <div id="gauge-uptime" style="color:var(--bp-cyan); font-size:13px; font-weight:600;">00:00:00</div>
+            </div>
+
+            <div class="gauge-wrap">
+                <!--
+                  SVG viewBox: 400 wide x 220 tall
+                  Centre of arc: cx=200, cy=200, radius=160
+                  Arc sweeps from 180° (left) to 0° (right) — a perfect semicircle
+                  Needle at 0 kWh points straight LEFT (180°)
+                -->
+                <svg viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg">
+
+                    <!-- ── Background track (dark ring) ── -->
+                    <path d="M 40,200 A 160,160 0 0,1 360,200"
+                          fill="none" stroke="#0d1e35" stroke-width="28"/>
+
+                    <!--
+                      Arc goes from LEFT (180°) to RIGHT (0°) through the TOP.
+                      SVG sweep-flag=1 means clockwise, but going left→top→right IS clockwise.
+                      Tier boundaries (fraction of 180° sweep):
+                        3000/9000 = 1/3  → 60° swept  → angle from right = 180°-60°  = 120° std → point: (120, 61.24)  [top-left area]
+                        5000/9000 = 5/9  → 100° swept → angle = 180°-100° = 80°  std → point: (227.79, 40.22) [near top]
+                        7000/9000 = 7/9  → 140° swept → angle = 180°-140° = 40°  std → point: (322.53, 97.12) [top-right area]
+
+                      All computed as: x = 200 + 160*cos(a), y = 200 - 160*sin(a)
+                      (subtract sin because SVG y-axis is flipped)
+                        180°: (40.00,   200.00)
+                        120°: (120.00,  61.24)
+                         80°: (227.79,  42.22)
+                         40°: (322.53,  97.12)
+                          0°: (360.00,  200.00)
+                    -->
+
+                    <!-- Tier 1: GREEN  180°→120° -->
+                    <path d="M 40,200 A 160,160 0 0,1 120,61.24"
+                          fill="none" stroke="#22d98a" stroke-width="26" stroke-linecap="butt" opacity="0.9"/>
+
+                    <!-- Tier 2: YELLOW 120°→80° -->
+                    <path d="M 120,61.24 A 160,160 0 0,1 227.79,42.22"
+                          fill="none" stroke="#f5c518" stroke-width="26" stroke-linecap="butt" opacity="0.9"/>
+
+                    <!-- Tier 3: ORANGE 80°→40° -->
+                    <path d="M 227.79,42.22 A 160,160 0 0,1 322.53,97.12"
+                          fill="none" stroke="#f0883e" stroke-width="26" stroke-linecap="butt" opacity="0.9"/>
+
+                    <!-- Tier 4: RED    40°→0° -->
+                    <path d="M 322.53,97.12 A 160,160 0 0,1 360,200"
+                          fill="none" stroke="#f85149" stroke-width="26" stroke-linecap="butt" opacity="0.9"/>
+
+                    <!-- ── Divider gaps between tiers (navy lines to hide join) ── -->
+                    <!-- At 120° boundary: point (120, 61.24), radial toward (200,200) -->
+                    <!-- inner r=147: (200+147*cos120, 200-147*sin120) = (126.5, 72.7) -->
+                    <!-- outer r=173: (200+173*cos120, 200-173*sin120) = (113.5, 50.2) -->
+                    <line x1="126.5" y1="72.7"  x2="113.5" y2="50.2"  stroke="#0a1628" stroke-width="5"/>
+                    <!-- At 80° boundary: point (227.79, 42.22), radial toward (200,200) -->
+                    <!-- inner r=147: (200+147*cos80, 200-147*sin80) = (225.5, 55.2) -->
+                    <!-- outer r=173: (200+173*cos80, 200-173*sin80) = (230.1, 29.5) -->
+                    <line x1="225.5" y1="55.2"  x2="230.1" y2="29.5"  stroke="#0a1628" stroke-width="5"/>
+                    <!-- At 40° boundary: point (322.53, 97.12), radial toward (200,200) -->
+                    <!-- inner r=147: (200+147*cos40, 200-147*sin40) = (312.6, 105.5) -->
+                    <!-- outer r=173: (200+173*cos40, 200-173*sin40) = (332.5, 88.8) -->
+                    <line x1="312.6" y1="105.5" x2="332.5" y2="88.8"  stroke="#0a1628" stroke-width="5"/>
+
+                    <!-- ── Active fill arc (drawn by JS) ── -->
+                    <path id="arc-active"
+                          d="" fill="none" stroke-width="24" stroke-linecap="round" opacity="1"/>
+
+                    <!-- ── Needle ── -->
+                    <line id="gauge-needle"
+                          x1="200" y1="200"
+                          x2="200" y2="52"
+                          stroke="white" stroke-width="3" stroke-linecap="round"
+                          transform="rotate(-90, 200, 200)"
+                          style="transition: transform 0.9s cubic-bezier(0.34,1.2,0.64,1)"/>
+
+                    <!-- Needle hub -->
+                    <circle cx="200" cy="200" r="9"  fill="#e8f4f8"/>
+                    <circle cx="200" cy="200" r="4"  fill="#0a1628"/>
+
+                    <!-- ── Scale labels ── -->
+                    <text x="28"  y="218" fill="#7a9ab5" font-size="11" font-family="Rajdhani,sans-serif" text-anchor="middle">0</text>
+                    <text x="372" y="218" fill="#7a9ab5" font-size="11" font-family="Rajdhani,sans-serif" text-anchor="middle">9k+</text>
+                    <text x="200" y="218" fill="#7a9ab5" font-size="11" font-family="Rajdhani,sans-serif" text-anchor="middle">kWh</text>
+                    <text x="100" y="46"  fill="#7a9ab5" font-size="10" font-family="Rajdhani,sans-serif" text-anchor="middle">3k</text>
+                    <text x="228" y="24"  fill="#7a9ab5" font-size="10" font-family="Rajdhani,sans-serif" text-anchor="middle">5k</text>
+                    <text x="336" y="78"  fill="#7a9ab5" font-size="10" font-family="Rajdhani,sans-serif" text-anchor="middle">7k</text>
+                </svg>
+            </div>
+
+            <div class="gauge-cost-display">
+                <div class="gauge-cost-value">
+                    <span id="gauge-fils">0.000</span>
+                    <span style="font-size:20px; color:var(--bp-gray)"> fils</span>
+                </div>
+                <div class="gauge-cost-sub">
+                    <span id="gauge-bhd">0.000</span> BHD &nbsp;·&nbsp; <span id="gauge-kwh-val">0.000</span> kWh
+                </div>
+            </div>
+
+            <div class="gauge-tiers">
+                <div class="gauge-tier"><div class="tier-dot" style="background:#22d98a"></div> Tier 1: 0–3,000 kWh @ 3 fils</div>
+                <div class="gauge-tier"><div class="tier-dot" style="background:#f5c518"></div> Tier 2: 3,001–5,000 kWh @ 9 fils</div>
+                <div class="gauge-tier"><div class="tier-dot" style="background:#f0883e"></div> Tier 3: 5,001–7,000 kWh @ 16 fils</div>
+                <div class="gauge-tier"><div class="tier-dot" style="background:#f85149"></div> Tier 4: >7,000 kWh @ 32 fils</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section-label">Real-time Trends</div>
+
+    <!-- Trend Charts -->
+    <div class="charts-section">
+        <div class="charts-grid">
+
+            <!-- Voltage -->
+            <div class="chart-card volt">
+                <div class="chart-header">
+                    <span class="chart-label">⚡ Voltage</span>
+                    <span class="chart-live-val"><span id="chart-v-val">--</span> V</span>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="chart-voltage"></canvas>
+                </div>
+            </div>
+
+            <!-- Current -->
+            <div class="chart-card curr">
+                <div class="chart-header">
+                    <span class="chart-label">🔌 Current</span>
+                    <span class="chart-live-val"><span id="chart-i-val">--</span> A</span>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="chart-current"></canvas>
+                </div>
+            </div>
+
+            <!-- Power -->
+            <div class="chart-card pwr">
+                <div class="chart-header">
+                    <span class="chart-label">💡 Power</span>
+                    <span class="chart-live-val"><span id="chart-p-val">--</span> W</span>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="chart-power"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>ESP32 Energy Monitor &nbsp;|&nbsp; Real-time MQTT Dashboard &nbsp;|&nbsp; Bahrain Polytechnic</p>
+        <p style="margin-top:6px;">Default broker: <code>ws://broker.hivemq.com:8000/mqtt</code></p>
+    </div>
+</div>
+ 
+<script>
+    let client = null;
+    const TOPICS = {
+        voltage:   "unique/energy/voltage",
+        current:   "unique/energy/current",
+        power:     "unique/energy/power",
+        energy:    "unique/energy/energy",
+        frequency: "unique/energy/frequency",
+        pf:        "unique/energy/pf",
+        json:      "unique/energy/data",
+        cost:      "unique/energy/cost"
+    };
+ 
+    const statusDot   = document.getElementById("mqtt-dot");
+    const statusText  = document.getElementById("mqtt-status");
+    const lastUpdateEl = document.getElementById("last-update");
+    const alertBox    = document.getElementById("alert-box");
+    const alertMsg    = document.getElementById("alert-message");
+    const connectBtn  = document.getElementById("connect-btn");
+ 
+    function showAlert(msg) {
+        alertMsg.textContent = msg;
+        alertBox.classList.add("show");
+        setTimeout(() => alertBox.classList.remove("show"), 8000);
+    }
+ 
+    function updateStatus(cls, txt) {
+        statusDot.className = "status-dot " + cls;
+        statusText.textContent = txt;
+    }
+ 
+    function updateLastUpdate() {
+        lastUpdateEl.textContent = new Date().toLocaleTimeString();
+    }
+ 
+    // ── Gauge setup ──────────────────────────────────────────
+    // SVG viewBox 400x220, arc centre cx=200 cy=200, radius=160
+    // Needle at 0 kWh = pointing LEFT (rotate -90deg from up)
+    // Needle at 9000 kWh = pointing RIGHT (rotate +90deg from up)
+    // So rotation range: -90° (left) → +90° (right)
+
+    const MAX_KWH = 9000;
+
+    function calcTariffJS(kwh) {
+        let cost = 0, rem = kwh;
+        const t1 = Math.min(rem, 3000); cost += t1 * 3;   rem -= t1; if (rem <= 0) return cost;
+        const t2 = Math.min(rem, 2000); cost += t2 * 9;   rem -= t2; if (rem <= 0) return cost;
+        const t3 = Math.min(rem, 2000); cost += t3 * 16;  rem -= t3; if (rem <= 0) return cost;
+        cost += rem * 32;
+        return cost;
+    }
+
+    function arcPathSVG(cx, cy, r, startDeg, endDeg) {
+        // SVG y-axis is flipped, so y = cy - r*sin(angle)
+        // Angles: 180°=left, 0°=right, going clockwise through top (sweep=1)
+        const toRad = d => d * Math.PI / 180;
+        const sx = cx + r * Math.cos(toRad(startDeg));
+        const sy = cy - r * Math.sin(toRad(startDeg));
+        const ex = cx + r * Math.cos(toRad(endDeg));
+        const ey = cy - r * Math.sin(toRad(endDeg));
+        const large = Math.abs(endDeg - startDeg) > 180 ? 1 : 0;
+        return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
+    }
+
+    function drawGauge(kwh) {
+        const clamped = Math.min(Math.max(kwh, 0), MAX_KWH);
+
+        // Map kWh → needle rotation
+        // 0 kWh = -90° (pointing left), 9000 kWh = +90° (pointing right)
+        const rotation = -90 + (clamped / MAX_KWH) * 180;
+        const needle = document.getElementById("gauge-needle");
+        if (needle) needle.setAttribute("transform", `rotate(${rotation.toFixed(2)}, 200, 200)`);
+
+        // Active arc: from 180° (left) sweeping clockwise to current position
+        // 0 kWh → 180°, 9000 kWh → 0°
+        const activeEl = document.getElementById("arc-active");
+        if (activeEl) {
+            if (clamped > 0.001) {
+                const endAngle = 180 - (clamped / MAX_KWH) * 180;
+                activeEl.setAttribute("d", arcPathSVG(200, 200, 160, 180, endAngle));
+
+                // Color matches current tier
+                let color = "#22d98a";
+                if (clamped > 7000)      color = "#f85149";
+                else if (clamped > 5000) color = "#f0883e";
+                else if (clamped > 3000) color = "#f5c518";
+                activeEl.setAttribute("stroke", color);
+                activeEl.setAttribute("opacity", "0.55");
+            } else {
+                activeEl.setAttribute("d", "");
+            }
+        }
+
+        // Update text displays
+        const fils = calcTariffJS(clamped);
+        document.getElementById("gauge-fils").textContent    = fils.toFixed(3);
+        document.getElementById("gauge-bhd").textContent     = (fils / 1000).toFixed(6);
+        document.getElementById("gauge-kwh-val").textContent = clamped.toFixed(3);
+    }
+
+    // Init gauge — needle at far left
+    drawGauge(0);
+
+    // ── Uptime ticker ─────────────────────────────────────────
+    const CYCLE_MS = 30 * 24 * 60 * 60; // 30 days in seconds
+
+    // Load accumulated online seconds from localStorage
+    let onlineSeconds = parseInt(localStorage.getItem('gauge_online_seconds') || '0');
+
+    // If 30 days of online time reached, reset
+    if (onlineSeconds >= CYCLE_MS) {
+        onlineSeconds = 0;
+        localStorage.setItem('gauge_online_seconds', '0');
+    }
+
+    function isSystemOnline() {
+        // System is online if MQTT is connected
+        return client && client.connected;
+    }
+
+    setInterval(() => {
+        if (isSystemOnline()) {
+            onlineSeconds++;
+            localStorage.setItem('gauge_online_seconds', onlineSeconds);
+
+            // Reset after 30 days of online time
+            if (onlineSeconds >= CYCLE_MS) {
+                onlineSeconds = 0;
+                localStorage.setItem('gauge_online_seconds', '0');
+            }
+        }
+
+        // Always update display (shows last known time when offline)
+        const d = Math.floor(onlineSeconds / 86400);
+        const h = String(Math.floor((onlineSeconds % 86400) / 3600)).padStart(2, '0');
+        const m = String(Math.floor((onlineSeconds % 3600) / 60)).padStart(2, '0');
+        const s = String(onlineSeconds % 60).padStart(2, '0');
+        const el = document.getElementById("gauge-uptime");
+        if (el) {
+            el.textContent = d > 0 ? `${d}d ${h}:${m}:${s}` : `${h}:${m}:${s}`;
+            // Dim the timer when offline to show it's paused
+            el.style.color = isSystemOnline() ? 'var(--bp-cyan)' : 'var(--bp-gray)';
+        }
+    }, 1000);
+    // ─────────────────────────────────────────────────────────
+
+    // ── Trend Charts ─────────────────────────────────────────
+    const MAX_POINTS = 60; // keep last 60 readings
+
+    // Storage keys
+    const STORE = {
+        v: { labels: 'chart_v_labels', data: 'chart_v_data' },
+        i: { labels: 'chart_i_labels', data: 'chart_i_data' },
+        p: { labels: 'chart_p_labels', data: 'chart_p_data' }
+    };
+
+    function loadStored(key) {
+        try {
+            const labels = JSON.parse(localStorage.getItem(key.labels) || '[]');
+            const data   = JSON.parse(localStorage.getItem(key.data)   || '[]');
+            // Trim to MAX_POINTS in case it grew before a code change
+            return {
+                labels: labels.slice(-MAX_POINTS),
+                data:   data.slice(-MAX_POINTS)
+            };
+        } catch(e) { return { labels: [], data: [] }; }
+    }
+
+    function saveStored(key, labels, data) {
+        try {
+            localStorage.setItem(key.labels, JSON.stringify(labels));
+            localStorage.setItem(key.data,   JSON.stringify(data));
+        } catch(e) {}
+    }
+
+    function makeChartData(color, stored) {
+        return {
+            labels: stored.labels,
+            datasets: [{
+                data: stored.data,
+                borderColor: color,
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.4,
+                fill: true,
+                backgroundColor: color.replace(')', ', 0.08)').replace('rgb', 'rgba')
+            }]
+        };
+    }
+
+    const chartDefaults = {
+        type: 'line',
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 300 },
+            plugins: { legend: { display: false }, tooltip: { enabled: false } },
+            scales: {
+                x: {
+                    display: true,
+                    grid: { display: false },
+                    ticks: {
+                        color: '#7a9ab5',
+                        font: { family: 'Rajdhani, sans-serif', size: 9 },
+                        maxTicksLimit: 6,
+                        maxRotation: 0,
+                        padding: 4
+                    },
+                    border: { display: false }
+                },
+                y: {
+                    display: true,
+                    grid: { color: 'rgba(30,58,90,0.5)', drawBorder: false },
+                    ticks: {
+                        color: '#7a9ab5',
+                        font: { family: 'Rajdhani, sans-serif', size: 10 },
+                        maxTicksLimit: 4,
+                        padding: 4
+                    },
+                    border: { display: false }
+                }
+            }
+        }
+    };
+
+    const chartV = new Chart(document.getElementById('chart-voltage'), {
+        ...chartDefaults,
+        data: makeChartData('rgb(41,182,216)', loadStored(STORE.v))
+    });
+
+    const chartI = new Chart(document.getElementById('chart-current'), {
+        ...chartDefaults,
+        data: makeChartData('rgb(34,217,138)', loadStored(STORE.i))
+    });
+
+    const chartP = new Chart(document.getElementById('chart-power'), {
+        ...chartDefaults,
+        data: makeChartData('rgb(245,197,24)', loadStored(STORE.p))
+    });
+
+    function pushToChart(chart, storeKey, value) {
+        const now = new Date().toLocaleTimeString();
+        chart.data.labels.push(now);
+        chart.data.datasets[0].data.push(value);
+        if (chart.data.labels.length > MAX_POINTS) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+        }
+        chart.update('none');
+        // Persist to localStorage
+        saveStored(storeKey, chart.data.labels, chart.data.datasets[0].data);
+    }
+    // ─────────────────────────────────────────────────────────
+
+    function fmt(v, d = 2) {
+        const n = parseFloat(v);
+        return isNaN(n) ? "--" : n.toFixed(d);
+    }
+ 
+    function connectToBroker() {
+        const url  = document.getElementById("broker-url").value.trim();
+        const user = document.getElementById("username").value.trim();
+        const pass = document.getElementById("password").value.trim();
+        if (!url) { showAlert("Please enter a broker URL"); return; }
+        if (client && client.connected) client.end();
+ 
+        updateStatus("connecting", "Connecting...");
+        connectBtn.disabled = true;
+        connectBtn.textContent = "Connecting...";
+ 
+        const opts = { clean: true, connectTimeout: 10000, reconnectPeriod: 5000 };
+        if (user) { opts.username = user; opts.password = pass; }
+ 
+        try { client = mqtt.connect(url, opts); }
+        catch (e) {
+            showAlert("Invalid broker URL. Use: ws://IP:PORT");
+            updateStatus("disconnected", "Failed");
+            connectBtn.disabled = false;
+            connectBtn.textContent = "Connect";
+            return;
+        }
+ 
+        client.on("connect", () => {
+            updateStatus("connected", "Connected");
+            connectBtn.disabled = false;
+            connectBtn.textContent = "Connected ✓";
+            Object.values(TOPICS).forEach(t => client.subscribe(t));
+        });
+ 
+        client.on("message", (topic, message) => {
+            const val = message.toString();
+            updateLastUpdate();
+            switch (topic) {
+                case TOPICS.voltage:
+                    document.getElementById("voltage").textContent = fmt(val, 1);
+                    document.getElementById("chart-v-val").textContent = fmt(val, 1);
+                    pushToChart(chartV, STORE.v, parseFloat(val));
+                    break;
+                case TOPICS.current:
+                    document.getElementById("current").textContent = fmt(val, 3);
+                    document.getElementById("chart-i-val").textContent = fmt(val, 3);
+                    pushToChart(chartI, STORE.i, parseFloat(val));
+                    break;
+                case TOPICS.power:
+                    document.getElementById("power").textContent = fmt(val, 1);
+                    document.getElementById("chart-p-val").textContent = fmt(val, 1);
+                    pushToChart(chartP, STORE.p, parseFloat(val));
+                    break;
+                case TOPICS.energy:    document.getElementById("energy").textContent    = fmt(val, 3); drawGauge(parseFloat(val) || 0); break;
+                case TOPICS.frequency: document.getElementById("frequency").textContent = fmt(val, 1); break;
+                case TOPICS.pf:        document.getElementById("pf").textContent        = fmt(val, 2); break;
+            }
+        });
+ 
+        client.on("disconnect", () => { updateStatus("disconnected", "Disconnected"); connectBtn.disabled = false; connectBtn.textContent = "Reconnect"; });
+        client.on("reconnect",  () => updateStatus("connecting", "Reconnecting..."));
+        client.on("error", err => {
+            updateStatus("disconnected", "Error");
+            connectBtn.disabled = false;
+            connectBtn.textContent = "Connect";
+            let msg = "Connection failed. ";
+            if (err.code === "ECONNREFUSED") msg += "Broker refused. Check WebSocket port.";
+            else if (err.code === "ETIMEDOUT") msg += "Timed out. Check IP/firewall.";
+            else msg += err.message || "Unknown error.";
+            showAlert(msg);
+        });
+    }
+ 
+    window.addEventListener("load", () => setTimeout(connectToBroker, 500));
+    document.addEventListener("keypress", e => {
+        if (e.key === "Enter" && document.activeElement.tagName === "INPUT") connectToBroker();
+    });
+</script>
+</body>
+</html>
+ 
+
+
+
